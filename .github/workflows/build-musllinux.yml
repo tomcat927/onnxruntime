@@ -1,19 +1,22 @@
-name: Build musllinux aarch64 wheel
+# .github/workflows/build-musllinux.yml
+name: Build onnxruntime musllinux aarch64 wheel
 
 on:
   push:
     tags:
-      - "v*"          # 推送 v1.20.0 时触发
-  workflow_dispatch:  # 允许手动触发
+      - "v*"
+  workflow_dispatch:
 
 jobs:
   build-wheel:
-    name: Build onnxruntime musllinux_aarch64 wheel
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout code
+      - name: Checkout onnxruntime
         uses: actions/checkout@v4
+        with:
+          repository: microsoft/onnxruntime
+          ref: ${{ github.ref_name }}  # 使用标签版本
 
       - name: Set up QEMU for aarch64
         uses: docker/setup-qemu-action@v3
@@ -23,16 +26,69 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build musllinux aarch64 wheel
+      - name: Build and extract wheel using inline Dockerfile
         run: |
-          docker buildx build \
+          # 定义版本
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION="${VERSION:-1.20.0}"
+
+          # 使用 heredoc 内联 Dockerfile
+          docker buildx build --progress=plain \
             --platform linux/arm64 \
-            --build-arg ONNXRUNTIME_VERSION=${{ github.ref_name }} \
-            -f ./docker/Dockerfile.alpine-aarch64 \
+            --build-arg ONNXRUNTIME_VERSION=$VERSION \
             --output type=local,dest=wheelhouse \
-            .
+            - << 'EOF'
+            # syntax=docker/dockerfile:1
+
+            # ========== 基础环境 ==========
+            FROM --platform=linux/arm64 alpine:3.18
+
+            # 构建参数
+            ARG ONNXRUNTIME_VERSION=1.20.0
+
+            # 安装系统依赖
+            RUN apk add --no-cache \
+                python3 \
+                py3-pip \
+                g++ \
+                make \
+                linux-headers \
+                cmake \
+                wget \
+                tar \
+                openssl-dev \
+                libffi-dev
+
+            # 升级 pip
+            RUN pip3 install --upgrade pip
+
+            # 安装 Python 构建依赖
+            RUN pip3 install --no-cache-dir numpy protobuf setuptools wheel
+
+            # 工作目录
+            WORKDIR /workspace
+
+            # 复制源码（GitHub Actions 会把代码挂载进来）
+            COPY . .
+
+            # 构建 onnxruntime C++ 核心
+            RUN ./build.sh \
+                --config Release \
+                --build_shared_lib \
+                --parallel \
+                --skip_tests \
+                --use_openmp
+
+            # 构建 Python wheel
+            RUN cd python && \
+                python3 setup.py bdist_wheel --dist-dir ../wheelhouse
+
+            # 输出到 buildx 指定的目录
+            CMD ["sh", "-c", "cp /workspace/wheelhouse/*.whl /local/ 2>/dev/null || echo 'No wheel built'"]
+            EOF
 
       - name: Upload wheel
         uses: actions/upload-artifact@v3
         with:
           path: wheelhouse/
+          if-no-files-found: error
