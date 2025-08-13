@@ -1,4 +1,5 @@
-name: Build musllinux wheel
+# .github/workflows/build-musllinux.yml
+name: Build ONNX Runtime musllinux_aarch64 Wheel
 
 on:
   push:
@@ -10,22 +11,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-    - name: Set up QEMU (for cross-building aarch64)
+    - name: Set up QEMU for aarch64 emulation
       uses: docker/setup-qemu-action@v2
       with:
-        platforms: aarch64
+        platforms: arm64
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Build musllinux wheel
+    - name: Build ONNX Runtime musllinux_aarch64
       run: |
-        docker run --rm -v "${{ github.workspace }}:/src" -w /src \
-          ghcr.io/pypa/musllinux_1_1_aarch64:latest \
-          /bin/bash -c "
-            python3 -m pip install --upgrade pip setuptools wheel
-            # 这里运行构建 onnxruntime 的命令，比如：
-            python3 setup.py bdist_wheel --plat-name musllinux_1_1_aarch64
-          "
+        docker buildx create --name mybuilder --driver docker-container --use
+        docker buildx build --platform linux/arm64 -t onnxruntime-musllinux-aarch64 -f Dockerfile .
+        docker run --rm -v $(pwd)/output:/output onnxruntime-musllinux-aarch64
+
+    - name: Upload wheel as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: onnxruntime-musllinux-aarch64
+        path: output/*.whl
