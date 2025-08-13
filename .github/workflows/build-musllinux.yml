@@ -1,114 +1,31 @@
-# .github/workflows/build-musllinux.yml
-name: Build onnxruntime musllinux aarch64 wheel
+name: Build musllinux wheel
 
 on:
   push:
-    tags:
-      - "v*"  # 推送 v1.20.0、v1.21.0 等标签时触发
-  workflow_dispatch: # 允许手动触发
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build-wheel:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
+  build:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout onnxruntime source code
-        uses: actions/checkout@v4
-        with:
-          repository: microsoft/onnxruntime
-          ref: ${{ github.ref_name || 'main' }}  # 如果没标签，用 main
-          path: onnxruntime-src
+    - uses: actions/checkout@v3
 
-      - name: Set up QEMU for aarch64 emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+    - name: Set up QEMU (for cross-building aarch64)
+      uses: docker/setup-qemu-action@v2
+      with:
+        platforms: aarch64
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
-      - name: Build musllinux aarch64 wheel using inline Dockerfile
-        run: |
-          # 获取版本号（从标签 v1.20.0 → 1.20.0）
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          VERSION="${VERSION:-1.20.0}"  # 默认值，用于手动触发
-          echo "Building onnxruntime version: $VERSION"
-
-          # 使用 heredoc 内联 Dockerfile（注意：EOF 必须顶格，无空格）
-          docker buildx build \
-            --platform linux/arm64 \
-            --build-arg ONNXRUNTIME_VERSION="$VERSION" \
-            --output type=local,dest=wheelhouse \
-            - << 'EOF'
-# syntax=docker/dockerfile:1
-FROM --platform=linux/arm64 alpine:3.18
-
-# 设置构建参数
-ARG ONNXRUNTIME_VERSION=1.20.0
-ENV ONNXRUNTIME_VERSION=${ONNXRUNTIME_VERSION}
-
-# 安装系统依赖
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    g++ \
-    make \
-    linux-headers \
-    cmake \
-    git \
-    wget \
-    tar \
-    ca-certificates \
-    openssl-dev \
-    libffi-dev
-
-# 升级 pip
-RUN pip3 install --upgrade pip
-
-# 安装 Python 构建依赖
-RUN pip3 install --no-cache-dir \
-    numpy==1.23.5 \
-    protobuf \
-    setuptools \
-    wheel
-
-# 工作目录
-WORKDIR /workspace
-
-# 复制源码（GitHub Actions 会把 onnxruntime-src 挂载进来）
-COPY onnxruntime-src .
-
-# 构建 onnxruntime C++ 核心（跳过测试以节省时间）
-RUN ./build.sh \
-    --config Release \
-    --build_shared_lib \
-    --parallel \
-    --skip_tests \
-    --use_openmp \
-    --cmake_extra_defines "CMAKE_INSTALL_PREFIX=/install"
-
-# 构建 Python wheel
-RUN cd python && \
-    python3 setup.py bdist_wheel --dist-dir ../wheelhouse
-
-# 输出产物到 buildx 指定的目录
-CMD ["sh", "-c", "cp /workspace/wheelhouse/*.whl /local/ 2>/dev/null || echo 'No wheel built'"]
-EOF
-
-      - name: Check wheel generated
-        run: |
-          if [ ! -f wheelhouse/*.whl ]; then
-            echo "❌ No wheel file generated!"
-            exit 1
-          else
-            echo "✅ Wheel generated:"
-            ls -lh wheelhouse/
-          fi
-
-      - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
-        with:
-          path: wheelhouse/
-          name: onnxruntime-musllinux-aarch64-wheel
-          if-no-files-found: error
+    - name: Build musllinux wheel
+      run: |
+        docker run --rm -v "${{ github.workspace }}:/src" -w /src \
+          ghcr.io/pypa/musllinux_1_1_aarch64:latest \
+          /bin/bash -c "
+            python3 -m pip install --upgrade pip setuptools wheel
+            # 这里运行构建 onnxruntime 的命令，比如：
+            python3 setup.py bdist_wheel --plat-name musllinux_1_1_aarch64
+          "
