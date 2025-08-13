@@ -1,5 +1,45 @@
-- name: Build musllinux wheels
-  uses: pypa/cibuildwheel@v2
-  env:
-    CIBW_PLATFORM: "musllinux_aarch64"  #  aarch64
-    CIBW_BEFORE_ALL: "apk add g++ make linux-headers"
+# .github/workflows/wheels.yml
+name: Build onnxruntime musllinux wheels
+
+on:
+  push:
+    tags:
+      - "v*"  # 触发版本发布
+  workflow_dispatch: # 手动触发
+
+jobs:
+  build-wheels:
+    name: Build musllinux aarch64 wheel
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        arch: [aarch64]
+
+    steps:
+      - name: Checkout onnxruntime
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/onnxruntime
+          ref: v1.20.0  # 指定你要构建的版本
+
+      - name: Set up QEMU for aarch64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build musllinux aarch64 wheel
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            --build-arg ONNXRUNTIME_VERSION=1.20.0 \
+            -f ./docker/Dockerfile.alpine-aarch64 \
+            --output type=local,dest=wheelhouse \
+            .
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v3
+        with:
+          path: wheelhouse/
