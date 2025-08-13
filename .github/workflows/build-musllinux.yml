@@ -1,5 +1,4 @@
-# .github/workflows/build-musllinux.yml
-name: Build ONNX Runtime musllinux_aarch64 Wheel
+name: Build musllinux Docker Image
 
 on:
   push:
@@ -11,23 +10,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4  # 推荐使用 v4
+    - uses: actions/checkout@v4
+    - uses: docker/setup-qemu-action@v3
+    - uses: docker/setup-buildx-action@v3
 
-    - name: Set up QEMU for aarch64 emulation
-      uses: docker/setup-qemu-action@v3  # QEMU Action 暂无重大变更，仍可用 v3
-      with:
-        platforms: arm64
-
-    - name: Build Docker image and ONNX Runtime
+    - name: Build and load (single platform)
       run: |
-        docker buildx create --name mybuilder --driver docker-container --use
-        docker buildx build --platform linux/arm64 -t onnxruntime-musllinux-aarch64 -f build/Dockerfile .
-        docker run --rm -v $(pwd)/output:/output onnxruntime-musllinux-aarch64
+        docker buildx build \
+          --platform linux/arm64 \  # 单平台
+          -t onnxruntime-musllinux:latest \
+          --load \
+          .
 
-    - name: Upload wheel as artifact
-      uses: actions/upload-artifact@v4  # 升级到 v4
-      with:
-        name: onnxruntime-musllinux-aarch64
-        path: output/*.whl
-        if-no-files-found: error  # 可选：未找到文件时标记为失败
+    - name: Test image
+      run: docker run --rm onnxruntime-musllinux:latest uname -m
